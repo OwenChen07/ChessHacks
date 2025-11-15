@@ -5,13 +5,13 @@ from fen_to_tensor import fen_to_tensor
 from chess_dataset import ChessDataset
 
 
-def load_trained_model(model_path="chess_model.pth", num_filters=128, num_residual_blocks=5):
+def load_trained_model(model_path="chess_model_big.pth", num_filters=128, num_residual_blocks=5):
     """
     Load a trained model from disk.
     
     Args:
         model_path: Path to saved model weights
-        num_filters: Number of filters (must match training)
+        num_filters: Numsber of filters (must match training)
         num_residual_blocks: Number of blocks (must match training)
         
     Returns:
@@ -148,6 +148,59 @@ def interactive_test(model):
             print(f"Error: {e}")
             print("Please enter a valid FEN string.")
 
+def test_value_head(model):
+    print("\n" + "="*60)
+    print("TESTING VALUE HEAD (0–1 OUTPUT RANGE)")
+    print("="*60)
+
+    test_positions = [
+        ("White up a queen",
+         "8/8/8/8/8/8/8/3Qk3 w - - 0 1",
+         "White"),
+
+        ("Black up a rook",
+         "8/8/8/8/8/8/3r4/4K3 b - - 0 1",
+         "Black"),
+
+        ("Equal position",
+         "8/8/8/8/8/8/3k4/4K3 w - - 0 1",
+         "Equal"),
+
+        ("White has mate in 1",
+         "6rk/5Q1p/8/8/8/8/8/7K w - - 0 1",
+         "White"),
+
+        ("Black has mate in 1",
+         "7k/8/8/8/8/8/5q2/7K b - - 0 1",
+         "Black")
+    ]
+
+    for desc, fen, expected in test_positions:
+        board_tensor = torch.from_numpy(fen_to_tensor(fen)).float()
+        board = chess.Board(fen)
+
+        with torch.no_grad():
+            move_uci, conf, value = model.get_best_move_uci(board_tensor, board)
+
+        print(f"\n--- {desc} ---")
+        print(board)
+        print(f"Expected side winning: {expected}")
+        print(f"Model raw value: {value:.3f}")
+
+        # Interpretation
+        if value > 0.70:
+            verdict = "White winning"
+        elif value < 0.30:
+            verdict = "Black winning"
+        else:
+            verdict = "Equal / unclear"
+
+        print(f"Model interpretation: {verdict}")
+
+    print("\n" + "="*60)
+    print("VALUE HEAD TEST COMPLETE")
+    print("="*60)
+
 
 def compare_to_stockfish(model, fen, stockfish_move):
     """
@@ -211,4 +264,6 @@ if __name__ == "__main__":
     if response == 'y':
         interactive_test(model)
     
+    test_value_head(model)
+
     print("\n✓ Testing complete!")

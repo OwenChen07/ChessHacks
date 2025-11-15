@@ -226,17 +226,17 @@ def train_model(
     return model
 
 
-if __name__ == "__main__":
-    # Example: Train on 10,000 positions
-    model = train_model(
-        csv_path="data/data.csv",  # Changed from ../data/data.csv
-        num_epochs=5,
-        batch_size=64,
-        learning_rate=0.001,
-        num_filters=128,
-        num_residual_blocks=5,
-        max_rows=40000,  # Use first 10k positions for testing
-        save_path="chess_model.pth"
-    )
+# if __name__ == "__main__":
+#     # Example: Train on 10,000 positions
+#     model = train_model(
+#         csv_path="data/data.csv",  # Changed from ../data/data.csv
+#         num_epochs=5,
+#         batch_size=64,
+#         learning_rate=0.001,
+#         num_filters=128,
+#         num_residual_blocks=5,
+#         max_rows=100000,  # Use first 10k positions for testing
+#         save_path="chess_model.pth"
+#     )
     
-    print("\n✓ Training finished!")
+#     print("\n✓ Training finished!")

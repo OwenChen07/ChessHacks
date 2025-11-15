@@ -7,7 +7,7 @@ from tqdm import tqdm
 #   move in UCI format, 
 #   game result (win: 1, tie: 0.5, loss: 0)
 
-def prepare_data(pgn_path, out_csv, max_games):
+def prepare_data(pgn_path, out_csv, max_games=int(1e9)):
     with open(pgn_path) as f, open(out_csv, "w", newline='') as out:
         writer = csv.writer(out)
         writer.writerow(["fen","move","result"])
@@ -31,4 +31,4 @@ def prepare_data(pgn_path, out_csv, max_games):
                 board.push(move)
                 node = next_node
 
-prepare_data("data/lichess_elite_2020-08.pgn", "data/data.csv", 10000)
+prepare_data("data/lichess_elite_2021-08.pgn", "data/data2.csv", 1002482)
