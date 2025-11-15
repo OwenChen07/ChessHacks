@@ -174,6 +174,19 @@ class ChessNet(nn.Module):
             # Get policy for this position
             policy = policy_tensor[i]  # (8, 8, 73)
             
+            legal_moves = list(board.legal_moves)
+            for move in legal_moves:
+                temp_board = board.copy()
+                temp_board.push(move)
+                if temp_board.is_checkmate():
+                    # Found mate-in-1 — override everything
+                    best_moves.append(move)
+                    probabilities.append(1.0)  # Full confidence
+                    break
+            # If we already appended a mate-in-1 move:
+            if len(best_moves) == i + 1:
+                continue
+
             # Apply softmax to get probabilities
             policy_flat = policy.view(-1)  # Flatten to (4672,)
             probs = F.softmax(policy_flat, dim=0)

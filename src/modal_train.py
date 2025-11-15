@@ -50,13 +50,13 @@ def train_remote():
 
     model = train_model(
         csv_path="/root/data/data2.csv",
-        num_epochs=3,
+        num_epochs=7,
         batch_size=64,
         learning_rate=0.001,
         num_filters=128,
         num_residual_blocks=5,
-        max_rows=3000000,
-        save_path="/root/model/chess_model_big.pth",
+        max_rows=25000000,
+        save_path="/root/model/chess_model_v3.pth",
     )
 
     print("Training finished. Model saved to /root/model/chess_model.pth")

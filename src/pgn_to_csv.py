@@ -31,4 +31,4 @@ def prepare_data(pgn_path, out_csv, max_games=int(1e9)):
                 board.push(move)
                 node = next_node
 
-prepare_data("data/lichess_elite_2021-08.pgn", "data/data2.csv", 1002482)
+prepare_data("data/lichess_elite_2022-01.pgn", "data/data2.csv", 480109)
