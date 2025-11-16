@@ -3,18 +3,65 @@ import torch.nn as nn
 import torch.nn.functional as F
 import chess
 
-PIECE_VALUES = {
-    'P': 100, 'N': 320, 'B': 330, 'R': 500, 'Q': 900, 'K': 20000,
-    'p': -100, 'n': -320, 'b': -330, 'r': -500, 'q': -900, 'k': -20000,
-}
-
-def material_eval(board: chess.Board):
+def evaluate_material(board):
+    """
+    Calculate material balance for the current position.
+    Positive = white is winning, Negative = black is winning
+    """
+    piece_values = {
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+        chess.KING: 0
+    }
+    
     score = 0
-    for sq in chess.SQUARES:
-        piece = board.piece_at(sq)
-        if piece:
-            score += PIECE_VALUES[piece.symbol()]
+    for piece_type in piece_values:
+        score += len(board.pieces(piece_type, chess.WHITE)) * piece_values[piece_type]
+        score -= len(board.pieces(piece_type, chess.BLACK)) * piece_values[piece_type]
+    
     return score
+
+def is_piece_hanging(board, move):
+    """
+    Check if making this move hangs a piece (leaves it undefended and attackable).
+    """
+    temp_board = board.copy()
+    temp_board.push(move)
+    
+    # Get the square the piece moved to
+    to_square = move.to_square
+    piece = temp_board.piece_at(to_square)
+    
+    if piece is None:
+        return False
+    
+    # Check if the piece is attacked by opponent
+    opponent_attacks = temp_board.attackers(not piece.color, to_square)
+    if not opponent_attacks:
+        return False
+    
+    # Check if the piece is defended
+    friendly_defenders = temp_board.attackers(piece.color, to_square)
+    
+    # If attacked and not defended, it's hanging
+    return len(opponent_attacks) > 0 and len(friendly_defenders) == 0
+
+def get_captures(board):
+    """Get all capturing moves."""
+    return [move for move in board.legal_moves if board.is_capture(move)]
+
+def get_checks(board):
+    """Get all checking moves."""
+    checks = []
+    for move in board.legal_moves:
+        temp_board = board.copy()
+        temp_board.push(move)
+        if temp_board.is_check():
+            checks.append(move)
+    return checks
 
 
 class ResidualBlock(nn.Module):
@@ -127,94 +174,190 @@ class ChessNet(nn.Module):
         
         return policy, value
     
-    def predict_move(self, board_tensor):
+    def extract_best_move(self, policy_tensor, board, use_tactical_search=True):
         """
-        Predict the best move for a single position.
-        
-        Args:
-            board_tensor: Single board (8, 8, 18) or batch (batch, 8, 8, 18)
-            
-        Returns:
-            policy: Move probabilities
-            value: Position evaluation
-        """
-        self.eval()  # Set to evaluation mode
-        with torch.no_grad():
-            # Add batch dimension if single board
-            if board_tensor.dim() == 3:
-                board_tensor = board_tensor.unsqueeze(0)
-            
-            policy, value = self.forward(board_tensor)
-            return policy, value
-    
-    def extract_best_move(self, policy_tensor, board):
-        """
-        Extract the best move from the policy tensor.
+        Extract the best move from the policy tensor with tactical awareness.
         
         Args:
             policy_tensor: Policy output from model, shape (8, 8, 73) or (batch, 8, 8, 73)
             board: chess.Board object for the current position
+            use_tactical_search: Whether to use tactical filtering (default: True)
             
         Returns:
             best_move: chess.Move object (or list of moves if batch)
             probability: Probability of the best move (or list if batch)
         """
-        from move_encoder import decode_tensor_to_move
+        from move_encoder import decode_tensor_to_move, move_to_policy_index
         
         # Handle batch vs single position
         is_batch = policy_tensor.dim() == 4
         if not is_batch:
-            policy_tensor = policy_tensor.unsqueeze(0)  # Add batch dim
+            policy_tensor = policy_tensor.unsqueeze(0)
         
         batch_size = policy_tensor.size(0)
         best_moves = []
         probabilities = []
         
         for i in range(batch_size):
-            # Get policy for this position
             policy = policy_tensor[i]  # (8, 8, 73)
-            
             legal_moves = list(board.legal_moves)
+            
+            # Priority 1: Check for checkmate in 1
             for move in legal_moves:
                 temp_board = board.copy()
                 temp_board.push(move)
                 if temp_board.is_checkmate():
-                    # Found mate-in-1 — override everything
                     best_moves.append(move)
-                    probabilities.append(1.0)  # Full confidence
+                    probabilities.append(1.0)
                     break
-            # If we already appended a mate-in-1 move:
+            
             if len(best_moves) == i + 1:
                 continue
-
+            
+            # Priority 2: If tactical search is enabled, filter out terrible moves
+            if use_tactical_search:
+                initial_material = evaluate_material(board)
+                
+                # Get all legal moves with their model scores
+                move_scores = []
+                for move in legal_moves:
+                    try:
+                        row, col, plane = move_to_policy_index(move, board)
+                        score = policy[row, col, plane].item()
+                        move_scores.append((move, score))
+                    except:
+                        continue
+                
+                # Sort by model probability (descending)
+                move_scores.sort(key=lambda x: x[1], reverse=True)
+                
+                # Tactical filters
+                captures = get_captures(board)
+                checks = get_checks(board)
+                
+                # Check if we can capture a free piece
+                free_captures = []
+                for move in captures:
+                    temp_board = board.copy()
+                    temp_board.push(move)
+                    captured_piece = board.piece_at(move.to_square)
+                    
+                    # Check if the piece we're capturing is undefended
+                    if captured_piece:
+                        attackers = board.attackers(not board.turn, move.to_square)
+                        if len(attackers) == 0:  # Undefended piece
+                            free_captures.append(move)
+                
+                # Priority 2a: Take free pieces (especially high-value ones)
+                if free_captures:
+                    # Sort by captured piece value
+                    piece_values = {
+                        chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                        chess.ROOK: 5, chess.QUEEN: 9
+                    }
+                    
+                    free_captures_valued = []
+                    for move in free_captures:
+                        captured = board.piece_at(move.to_square)
+                        value = piece_values.get(captured.piece_type, 0)
+                        # Get model score for this move
+                        try:
+                            row, col, plane = move_to_policy_index(move, board)
+                            model_score = policy[row, col, plane].item()
+                        except:
+                            model_score = 0.0
+                        free_captures_valued.append((move, value, model_score))
+                    
+                    # Prefer higher value captures, but also consider model score
+                    free_captures_valued.sort(key=lambda x: (x[1], x[2]), reverse=True)
+                    best_move = free_captures_valued[0][0]
+                    
+                    try:
+                        row, col, plane = move_to_policy_index(best_move, board)
+                        prob = policy[row, col, plane].item()
+                    except:
+                        prob = 0.5
+                    
+                    best_moves.append(best_move)
+                    probabilities.append(prob)
+                    continue
+                
+                # Filter out moves that hang pieces (lose material for free)
+                safe_moves = []
+                for move, score in move_scores:
+                    temp_board = board.copy()
+                    temp_board.push(move)
+                    new_material = evaluate_material(temp_board)
+                    material_loss = initial_material - new_material
+                    
+                    # If we're losing more than a pawn without compensation, skip it
+                    if material_loss > 1.5:
+                        # Check if it's a check or forces something
+                        if temp_board.is_check():
+                            safe_moves.append((move, score))  # Checks can be worth it
+                        # Otherwise skip moves that hang material
+                        continue
+                    else:
+                        safe_moves.append((move, score))
+                
+                # If we filtered out all moves, fall back to original list
+                if not safe_moves:
+                    safe_moves = move_scores
+                
+                # Priority 2b: Consider checks if they're in top moves
+                if checks:
+                    for move, score in safe_moves[:5]:  # Top 5 moves
+                        if move in checks:
+                            best_moves.append(move)
+                            probabilities.append(score)
+                            break
+                    
+                    if len(best_moves) == i + 1:
+                        continue
+                
+                # Take the best safe move according to the model
+                if safe_moves:
+                    best_move, best_score = safe_moves[0]
+                    best_moves.append(best_move)
+                    probabilities.append(best_score)
+                    continue
+            
+            # Fallback: Use pure model prediction
             # Apply softmax to get probabilities
-            policy_flat = policy.view(-1)  # Flatten to (4672,)
+            policy_flat = policy.view(-1)
             probs = F.softmax(policy_flat, dim=0)
             
-            # Find the move with highest probability
-            best_idx = torch.argmax(probs).item()
-            best_prob = probs[best_idx].item()
+            # Get top-k moves and pick the first legal one
+            top_k = 50
+            top_indices = torch.topk(probs, k=min(top_k, len(probs))).indices
             
-            # Convert flat index back to (row, col, plane)
-            # Formula: idx = row * (8 * 73) + col * 73 + plane
-            row = best_idx // (8 * 73)
-            remainder = best_idx % (8 * 73)
-            col = remainder // 73
-            plane = remainder % 73
+            found_move = False
+            for idx in top_indices:
+                idx = idx.item()
+                row = idx // (8 * 73)
+                remainder = idx % (8 * 73)
+                col = remainder // 73
+                plane = remainder % 73
+                
+                move_tensor = torch.zeros(8, 8, 73)
+                move_tensor[row, col, plane] = 1.0
+                
+                try:
+                    move = decode_tensor_to_move(move_tensor.numpy(), board)
+                    if move in legal_moves:
+                        best_moves.append(move)
+                        probabilities.append(probs[idx].item())
+                        found_move = True
+                        break
+                except:
+                    continue
             
-            # Create a one-hot tensor for decoding
-            move_tensor = torch.zeros(8, 8, 73)
-            move_tensor[row, col, plane] = 1.0
-            
-            # Decode to chess move
-            try:
-                move = decode_tensor_to_move(move_tensor.numpy(), board)
+            if not found_move:
+                # Last resort: return a random legal move
+                import random
+                move = random.choice(legal_moves)
                 best_moves.append(move)
-                probabilities.append(best_prob)
-            except Exception as e:
-                print(f"Warning: Could not decode move at ({row}, {col}, {plane}): {e}")
-                best_moves.append(None)
-                probabilities.append(best_prob)
+                probabilities.append(0.0)
         
         # Return single move if not batch
         if not is_batch:
