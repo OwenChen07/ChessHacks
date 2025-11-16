@@ -12,8 +12,8 @@ from huggingface_hub import hf_hub_download
 # download weights from huggingface, etc.
 
 model_path = hf_hub_download(
-    repo_id="OwenChen07/ChessHacksModelV2",
-    filename="chess_model_big.pth"
+    repo_id="OwenChen07/ChessHacksV3",
+    filename="chess_model_v3.pth"
 )
 
 model = ChessNet(num_filters=128, num_residual_blocks=5)

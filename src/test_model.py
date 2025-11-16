@@ -5,7 +5,7 @@ from fen_to_tensor import fen_to_tensor
 from chess_dataset import ChessDataset
 
 
-def load_trained_model(model_path="chess_model_big.pth", num_filters=128, num_residual_blocks=5):
+def load_trained_model(model_path="chess_model_v3.pth", num_filters=128, num_residual_blocks=5):
     """
     Load a trained model from disk.
     
@@ -234,7 +234,7 @@ if __name__ == "__main__":
     print("="*60)
     
     # Load trained model
-    model = load_trained_model("chess_model.pth")
+    model = load_trained_model("chess_model_v3.pth")
     
     # Test 1: Starting position
     print("\n" + "="*60)
